@@ -3,17 +3,23 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ChatProvider } from './contexts/ChatContext';
-import App from './App.tsx';
+import App from './App';  // No need for .tsx extension
 import './index.css';
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <AuthProvider>
-        <ChatProvider>
-          <App />
-        </ChatProvider>
-      </AuthProvider>
-    </BrowserRouter>
-  </StrictMode>
-);
+const rootElement = document.getElementById('root');
+
+if (rootElement) {
+  createRoot(rootElement).render(
+    <StrictMode>
+      <BrowserRouter>
+        <AuthProvider>
+          <ChatProvider>
+            <App />
+          </ChatProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </StrictMode>
+  );
+} else {
+  console.error("Root element not found.");
+}
