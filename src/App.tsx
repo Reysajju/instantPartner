@@ -4,7 +4,7 @@ import { LandingPage } from './pages/LandingPage';
 import { ChatPage } from './pages/ChatPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
-function App() {
+export function App() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
@@ -20,3 +20,5 @@ function App() {
     </Routes>
   );
 }
+
+export default App;

@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { differenceInSeconds, addDays, format } from 'date-fns';
+import { differenceInSeconds, addDays } from 'date-fns';
+import { supabase } from '../lib/supabase';
+import { useAuth } from './AuthContext';
 
 interface Message {
   id: string;
@@ -20,41 +22,93 @@ interface ChatContextType {
   messages: Message[];
   partner: Partner | null;
   timeRemaining: string;
-  sendMessage: (content: string) => void;
+  sendMessage: (content: string) => Promise<void>;
   isChatExpired: boolean;
 }
 
 const ChatContext = createContext<ChatContextType | null>(null);
 
-const CHAT_DURATION = 24 * 60 * 60; // 24 hours in seconds
-
 export function ChatProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [partner, setPartner] = useState<Partner | null>(null);
   const [timeRemaining, setTimeRemaining] = useState('');
   const [isChatExpired, setIsChatExpired] = useState(false);
 
-  // Initialize partner matching
   useEffect(() => {
-    if (!partner) {
-      const newPartner = {
-        id: uuidv4(),
-        name: 'Anonymous Partner',
-        matchedAt: new Date(),
-      };
-      setPartner(newPartner);
-      setMessages([
-        {
-          id: uuidv4(),
-          content: "Hi there! Feel free to share whatever is on your mind. This is a safe space.",
-          timestamp: new Date(),
-          isOwn: false,
-        },
-      ]);
-    }
-  }, []);
+    if (!user) return;
 
-  // Update countdown timer
+    // Load chat history and partner info
+    const loadChatData = async () => {
+      const { data: chatData } = await supabase
+        .from('chats')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+
+      if (chatData) {
+        setPartner({
+          id: chatData.partner_id,
+          name: 'Anonymous Partner',
+          matchedAt: new Date(chatData.matched_at),
+        });
+
+        const { data: messages } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('chat_id', chatData.id)
+          .order('timestamp', { ascending: true });
+
+        if (messages) {
+          setMessages(messages.map(msg => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp),
+          })));
+        }
+      } else {
+        // Create new chat if none exists
+        const newPartner = {
+          id: uuidv4(),
+          name: 'Anonymous Partner',
+          matchedAt: new Date(),
+        };
+
+        const { data: newChat } = await supabase
+          .from('chats')
+          .insert({
+            user_id: user.id,
+            partner_id: newPartner.id,
+            matched_at: newPartner.matchedAt,
+          })
+          .select()
+          .single();
+
+        if (newChat) {
+          setPartner(newPartner);
+          const welcomeMessage = {
+            id: uuidv4(),
+            content: "Hi there! Feel free to share whatever is on your mind. This is a safe space.",
+            timestamp: new Date(),
+            isOwn: false,
+          };
+
+          await supabase
+            .from('messages')
+            .insert({
+              chat_id: newChat.id,
+              content: welcomeMessage.content,
+              timestamp: welcomeMessage.timestamp,
+              is_own: welcomeMessage.isOwn,
+            });
+
+          setMessages([welcomeMessage]);
+        }
+      }
+    };
+
+    loadChatData();
+  }, [user]);
+
   useEffect(() => {
     if (!partner) return;
 
@@ -86,8 +140,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(timer);
   }, [partner]);
 
-  const sendMessage = (content: string) => {
-    if (isChatExpired) return;
+  const sendMessage = async (content: string) => {
+    if (isChatExpired || !user) return;
 
     const newMessage: Message = {
       id: uuidv4(),
@@ -97,27 +151,28 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       status: 'sent',
     };
 
-    setMessages((prev) => [...prev, newMessage]);
+    const { data: chatData } = await supabase
+      .from('chats')
+      .select('id')
+      .eq('user_id', user.id)
+      .single();
 
-    // Simulate message being delivered
-    setTimeout(() => {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === newMessage.id ? { ...msg, status: 'delivered' } : msg
-        )
-      );
-    }, 1000);
+    if (chatData) {
+      await supabase
+        .from('messages')
+        .insert({
+          id: newMessage.id,
+          chat_id: chatData.id,
+          content: newMessage.content,
+          timestamp: newMessage.timestamp,
+          is_own: newMessage.isOwn,
+          status: newMessage.status,
+        });
 
-    // Simulate message being seen
-    setTimeout(() => {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === newMessage.id ? { ...msg, status: 'seen' } : msg
-        )
-      );
+      setMessages(prev => [...prev, newMessage]);
 
       // Simulate partner response
-      if (!isChatExpired) {
+      setTimeout(async () => {
         const responses = [
           "I understand how you feel. Would you like to tell me more about that?",
           "That sounds challenging. How are you coping with it?",
@@ -133,9 +188,19 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           isOwn: false,
         };
 
-        setMessages((prev) => [...prev, response]);
-      }
-    }, 2000);
+        await supabase
+          .from('messages')
+          .insert({
+            id: response.id,
+            chat_id: chatData.id,
+            content: response.content,
+            timestamp: response.timestamp,
+            is_own: response.isOwn,
+          });
+
+        setMessages(prev => [...prev, response]);
+      }, 2000);
+    }
   };
 
   return (
